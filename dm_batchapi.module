@@ -130,8 +130,5 @@ function dm_batchapi_import_data($data, $legend) {
 
     // Save Node.
     node_save($node);
-
-    // Save Node CCK fields.
-    _content_field_invoke_default('update', $node);
   }
 }
