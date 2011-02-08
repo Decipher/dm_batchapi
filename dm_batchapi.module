@@ -1,0 +1,137 @@
+<?php
+// $Id$
+/**
+ * @file
+ */
+
+/**
+ * Features integration.
+ */
+include_once('dm_batchapi.features.inc');
+
+/**
+ * Implements hook_menu().
+ */
+function dm_batchapi_menu() {
+  $items = array();
+
+  $items['dm_batchapi'] = array(
+    'title' => 'Batch API import',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('dm_batchapi_import'),
+    'access callback' => TRUE,
+  );
+
+  return $items;
+}
+
+/**
+ * Batch API import form.
+ */
+function dm_batchapi_import(&$form_state) {
+  $form = array();
+
+  // Required for file handling.
+  $form['#attributes'] = array(
+    'enctype' => "multipart/form-data"
+  );
+
+  // File field.
+  $form['database'] = array(
+    '#type' => 'file',
+    '#title' => t('Database'),
+  );
+
+  // Submit button.
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Import')
+  );
+
+  return $form;
+}
+
+function dm_batchapi_import_submit(&$form_state, $form) {
+  if ($file = file_save_upload('database')) {
+    $batch = array(
+      'title' => t('Importing'),
+      'operations' => array(
+        array('dm_batchapi_import_batch', array($file)),
+      ),
+    );
+    batch_set($batch);
+  }
+}
+
+function dm_batchapi_import_batch($file, &$context) {
+ if (empty($context['sandbox'])) {
+    $context['sandbox']['max'] = 0;
+    $context['sandbox']['file'] = fopen($file->filepath, 'r');
+
+    while (!feof($context['sandbox']['file'])) {
+      fgetcsv($context['sandbox']['file']);
+      $context['sandbox']['max']++;
+    }
+    fclose($context['sandbox']['file']);
+
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['pointer'] = 0;
+    $context['sandbox']['legend'] = array();
+  }
+
+  $file = fopen($file->filepath, 'r');
+  fseek($file, $context['sandbox']['pointer']);
+
+  $count = 0;
+  $limit = 5;
+  while ($count < $limit && $context['sandbox']['progress'] < $context['sandbox']['max']) {
+    $data = fgetcsv($file);
+
+    if ($context['sandbox']['progress'] == 0) {
+      $context['sandbox']['legend'] = $data;
+    }
+    else {
+      if (count($data) > 0) {
+        dm_batchapi_import_data($data, $context['sandbox']['legend']);
+      }
+    }
+
+    $count++;
+    $context['sandbox']['progress']++;
+    $context['message'] = t("Importing entry: !progess of !total", array('!progess' => $context['sandbox']['progress'] - 1, '!total' => $context['sandbox']['max'] - 1));
+  }
+
+  $context['sandbox']['pointer'] = ftell($file);
+  fclose($file);
+
+  if ($context['sandbox']['progress'] < $context['sandbox']['max']) {
+    $context['finished'] = $context['sandbox']['progress'] / $context['sandbox']['max'];
+  }
+}
+
+function dm_batchapi_import_data($data, $legend) {
+  if (is_array($data)) {
+    $fields = array();
+    foreach ($data as $delta => $item) {
+      $fields[$legend[$delta]] = $item;
+    }
+
+    // Build Node object.
+    $node = new stdClass();
+    $node->type = 'data';
+    $node->uid = 1;
+    $node->title = $fields['title'];
+    $node->body = $fields['body'];
+    $node->field_data_field1[0]['value'] = $fields['field_data_field1_value'];
+    $node->field_data_field2[0]['value'] = $fields['field_data_field2_value'];
+    $node->field_data_field3[0]['value'] = $fields['field_data_field3_value'];
+    $node->field_data_field4[0]['value'] = $fields['field_data_field4_value'];
+    $node->field_data_field5[0]['value'] = $fields['field_data_field5_value'];
+
+    // Save Node.
+    node_save($node);
+
+    // Save Node CCK fields.
+    _content_field_invoke_default('update', $node);
+  }
+}
